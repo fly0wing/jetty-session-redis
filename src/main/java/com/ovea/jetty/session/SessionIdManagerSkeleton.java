@@ -133,6 +133,10 @@ public abstract class SessionIdManagerSkeleton extends AbstractSessionIdManager 
     @Override
     public final void addSession(HttpSession session) {
         String clusterId = getClusterId(session.getId());
+        addSession(clusterId);
+    }
+
+    private void addSession(String clusterId) {
         storeClusterId(clusterId);
         sessions.putIfAbsent(clusterId, Void.class);
     }
@@ -167,6 +171,26 @@ public abstract class SessionIdManagerSkeleton extends AbstractSessionIdManager 
     protected abstract boolean hasClusterId(String clusterId);
 
     protected abstract List<String> scavenge(List<String> clusterIds);
+
+    @Override
+    public void renewSessionId(final String oldClusterId, final String oldNodeId, final HttpServletRequest request) {
+        //generate a new id
+        final String newClusterId = newSessionId(request.hashCode());
+
+        synchronized (sessions) {
+            invalidateAll(oldClusterId);
+//            removeSession(oldClusterId);//remove the old one from the list (and database)
+            addSession(newClusterId); //add in the new session id to the list (and database)
+
+            //tell all contexts to update the id
+            forEachSessionManager(new SessionManagerCallback() {
+                @Override
+                public void execute(SessionManagerSkeleton sessionManager) {
+                    sessionManager.renewSessionId(oldClusterId, oldNodeId, newClusterId, getNodeId(newClusterId, request));
+                }
+            });
+        }
+    }
 
     private void forEachSessionManager(SessionManagerCallback callback) {
         Handler[] contexts = server.getChildHandlersByClass(ContextHandler.class);
