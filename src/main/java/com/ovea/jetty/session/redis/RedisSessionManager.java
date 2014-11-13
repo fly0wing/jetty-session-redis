@@ -28,6 +28,7 @@ import redis.clients.jedis.exceptions.JedisException;
 import javax.naming.InitialContext;
 import javax.servlet.http.HttpServletRequest;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static java.lang.Integer.parseInt;
 import static java.lang.Long.parseLong;
@@ -93,6 +94,11 @@ public final class RedisSessionManager extends SessionManagerSkeleton<RedisSessi
     public void doStop() throws Exception {
         super.doStop();
         serializer.stop();
+    }
+
+    @Override
+    protected void shutdownSessions() throws Exception {
+        // no op
     }
 
     @Override
@@ -171,8 +177,8 @@ public final class RedisSessionManager extends SessionManagerSkeleton<RedisSessi
     protected void storeSession(final RedisSession session) {
         if (!session.redisMap.isEmpty()) {
             final Map<String, String> toStore = session.redisMap.containsKey("attributes") ?
-                session.redisMap :
-                new TreeMap<String, String>(session.redisMap);
+                    session.redisMap :
+                    new TreeMap<String, String>(session.redisMap);
             if (toStore.containsKey("attributes"))
                 toStore.put("attributes", serializer.serialize(session.getSessionAttributes()));
             LOG.debug("[RedisSessionManager] storeSession - Storing session id={}", session.getClusterId());
@@ -218,6 +224,8 @@ public final class RedisSessionManager extends SessionManagerSkeleton<RedisSessi
 
         private final Map<String, String> redisMap = new TreeMap<String, String>();
 
+        private final Map<String, Object> _attributes = new ConcurrentHashMap<String, Object>();
+
         private long expiryTime;
         private long lastSaved;
         private String lastNode;
@@ -255,7 +263,7 @@ public final class RedisSessionManager extends SessionManagerSkeleton<RedisSessi
             super.setMaxInactiveInterval(parseInt(redisData.get("maxIdle")));
             setCookieSetTime(parseLong(redisData.get("cookieSet")));
             for (Map.Entry<String, Object> entry : attributes.entrySet()) {
-                super.doPutOrRemove(entry.getKey(), entry.getValue());
+                doPutOrRemove(entry.getKey(), entry.getValue());
             }
             super.access(parseLong(redisData.get("lastAccessed")));
         }
@@ -277,12 +285,43 @@ public final class RedisSessionManager extends SessionManagerSkeleton<RedisSessi
             redisMap.put("attributes", "");
         }
 
+        @Override
+        public Object doPutOrRemove(String name, Object value) {
+            return value == null ? _attributes.remove(name) : _attributes.put(name, value);
+        }
+
+        @Override
+        public Object doGet(String s) {
+            return _attributes.get(s);
+        }
+
+        @Override
+        public Enumeration<String> doGetAttributeNames() {
+            List<String> names = _attributes == null ? Collections.<String>emptyList() : new ArrayList<String>(_attributes.keySet());
+            return Collections.enumeration(names);
+        }
+
         public final Map<String, Object> getSessionAttributes() {
             Map<String, Object> attrs = new LinkedHashMap<String, Object>();
-            for (String key : super.getNames()) {
-                attrs.put(key, super.doGet(key));
+            for (String key : getNames()) {
+                attrs.put(key, doGet(key));
             }
             return attrs;
+        }
+
+        @Override
+        public Map<String, Object> getAttributeMap() {
+            return new HashMap<String, Object>(_attributes);
+        }
+
+        @Override
+        public int getAttributes() {
+            return _attributes.size();
+        }
+
+        @Override
+        public Set<String> getNames() {
+            return new HashSet<String>(_attributes.keySet());
         }
 
         @Override
@@ -316,11 +355,11 @@ public final class RedisSessionManager extends SessionManagerSkeleton<RedisSessi
         protected void complete() {
             super.complete();
             if (!redisMap.isEmpty()
-                && (redisMap.size() != 3
-                || !redisMap.containsKey("lastAccessed")
-                || !redisMap.containsKey("accessed")
-                || !redisMap.containsKey("expiryTime")
-                || getAccessed() - lastSaved >= saveIntervalSec * 1000)) {
+                    && (redisMap.size() != 3
+                    || !redisMap.containsKey("lastAccessed")
+                    || !redisMap.containsKey("accessed")
+                    || !redisMap.containsKey("expiryTime")
+                    || getAccessed() - lastSaved >= saveIntervalSec * 1000)) {
                 try {
                     willPassivate();
                     storeSession(this);
@@ -331,6 +370,22 @@ public final class RedisSessionManager extends SessionManagerSkeleton<RedisSessi
                     redisMap.clear();
                 }
             }
+        }
+
+        @Override
+        public void clearAttributes() {
+            while (_attributes != null && _attributes.size() > 0) {
+                ArrayList<String> keys;
+                synchronized (this) {
+                    keys = new ArrayList<String>(_attributes.keySet());
+                }
+                for (String key : keys) {
+                    changeAttribute(key, null);
+                }
+            }
+            if (_attributes != null)
+                _attributes.clear();
+
         }
 
         public boolean requestStarted() {
