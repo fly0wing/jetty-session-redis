@@ -25,14 +25,14 @@
         <dependency>
             <groupId>redis.clients</groupId>
             <artifactId>jedis</artifactId>
-            <version>2.0.0</version>
+            <version>2.6.0</version>
             <scope>provided</scope>
         </dependency>
 
         <dependency>
             <groupId>org.eclipse.jetty.aggregate</groupId>
             <artifactId>jetty-all</artifactId>
-            <version>8.1.2.v20120308</version>
+            <version>9.2.3.v20140905</version>
             <scope>provided</scope>
         </dependency>
 
@@ -212,6 +212,17 @@
             </plugin>
         </plugins>
     </build>
-
+    <distributionManagement>
+        <repository>
+            <id>wyf-releases</id>
+            <name>Local Nexus Repository</name>
+            <url>http://192.168.2.100:8081/nexus/content/repositories/releases/</url>
+        </repository>
+        <snapshotRepository>
+            <id>wyf-snapshots</id>
+            <name>Local Nexus Repository</name>
+            <url>http://192.168.2.100:8081/nexus/content/repositories/snapshots/</url>
+        </snapshotRepository>
+    </distributionManagement>
 </project>
 
